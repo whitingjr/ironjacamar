@@ -482,7 +482,9 @@ public class SemaphoreArrayListManagedConnectionPool implements ManagedConnectio
             kill = true;
 
          checkedOut.remove(cl);
-         statistics.setInUsedCount(checkedOut.size());
+         if (statistics.isEnabled()){
+        	statistics.setInUsedCount(checkedOut.size());
+         }
 
          // This is really an error
          if (!kill && isSize(poolConfiguration.getMaxSize() + 1))
