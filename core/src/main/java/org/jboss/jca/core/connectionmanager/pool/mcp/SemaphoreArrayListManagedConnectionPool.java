@@ -475,21 +475,23 @@ public class SemaphoreArrayListManagedConnectionPool implements ManagedConnectio
          kill = true;
       }
 
+       // We need to destroy this one
+       if (cl.getState() == ConnectionState.DESTROY || cl.getState() == ConnectionState.DESTROYED)
+           kill = true;
+
+       // This is really an error
+       if (!kill && isSize(poolConfiguration.getMaxSize() + 1))
+       {
+           log.destroyingReturnedConnectionMaximumPoolSizeExceeded(cl);
+           kill = true;
+       }
+
       synchronized (cls)
       {
-         // We need to destroy this one
-         if (cl.getState() == ConnectionState.DESTROY || cl.getState() == ConnectionState.DESTROYED)
-            kill = true;
 
          checkedOut.remove(cl);
          statistics.setInUsedCount(checkedOut.size());
 
-         // This is really an error
-         if (!kill && isSize(poolConfiguration.getMaxSize() + 1))
-         {
-            log.destroyingReturnedConnectionMaximumPoolSizeExceeded(cl);
-            kill = true;
-         }
 
          // If we are destroying, check the connection is not in the pool
          if (kill)
@@ -504,7 +506,7 @@ public class SemaphoreArrayListManagedConnectionPool implements ManagedConnectio
          // return to the pool
          else
          {
-            cl.used();
+
             if (!cls.contains(cl))
             {
                cls.add(cl);
@@ -514,13 +516,16 @@ public class SemaphoreArrayListManagedConnectionPool implements ManagedConnectio
                log.attemptReturnConnectionTwice(cl, new Throwable("STACKTRACE"));
             }
          }
-
-         if (clPermits.containsKey(cl))
-         {
-            clPermits.remove(cl);
-            permits.release();
-         }
       }
+
+       if(!kill)
+           cl.used();
+
+       ConnectionListener present = clPermits.remove(cl);
+       if (present != null)
+       {
+           permits.release();
+       }
 
       if (kill)
       {
