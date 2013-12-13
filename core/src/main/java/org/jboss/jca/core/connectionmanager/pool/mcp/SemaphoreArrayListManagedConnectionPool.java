@@ -482,9 +482,7 @@ public class SemaphoreArrayListManagedConnectionPool implements ManagedConnectio
             kill = true;
 
          checkedOut.remove(cl);
-         if (statistics.isEnabled()){
-        	statistics.setInUsedCount(checkedOut.size());
-         }
+     	 statistics.setInUsedCount(checkedOut.size());
 
          // This is really an error
          if (!kill && isSize(poolConfiguration.getMaxSize() + 1))
@@ -517,10 +515,10 @@ public class SemaphoreArrayListManagedConnectionPool implements ManagedConnectio
             }
          }
 
-         if (clPermits.containsKey(cl))
+         ConnectionListener present = clPermits.remove(cl);
+         if (present != null)
          {
-            clPermits.remove(cl);
-            permits.release();
+        	 permits.release();
          }
       }
 
