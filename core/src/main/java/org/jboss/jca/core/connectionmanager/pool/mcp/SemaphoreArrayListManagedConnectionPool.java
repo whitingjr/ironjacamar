@@ -488,10 +488,10 @@ public class SemaphoreArrayListManagedConnectionPool implements ManagedConnectio
 
       synchronized (cls)
       {
-
          checkedOut.remove(cl);
-         statistics.setInUsedCount(checkedOut.size());
-
+         if ( statistics.isEnabled() ){
+            statistics.setInUsedCount(checkedOut.size());
+         }
 
          // If we are destroying, check the connection is not in the pool
          if (kill)
@@ -521,8 +521,7 @@ public class SemaphoreArrayListManagedConnectionPool implements ManagedConnectio
        if(!kill)
            cl.used();
 
-       ConnectionListener present = clPermits.remove(cl);
-       if (present != null)
+       if (clPermits.remove(cl) != null)
        {
            permits.release();
        }
