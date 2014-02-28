@@ -467,9 +467,9 @@ public class SemaphoreArrayListManagedConnectionPool implements ManagedConnectio
          if (trace)
             log.trace("ManagedConnection is being returned after it was destroyed: " + cl);
 
-         ConnectionListener present = clPermits.remove(cl);
-         if (present != null)
+         if (clPermits.containsKey(cl)) 
          {
+        	clPermits.remove(cl);
             permits.release();
          }
 
@@ -529,9 +529,9 @@ public class SemaphoreArrayListManagedConnectionPool implements ManagedConnectio
       if (statistics.isEnabled())
          statistics.setInUsedCount(checkedOut.size());
 
-      ConnectionListener present = clPermits.remove(cl);
-      if (present != null)
+      if (clPermits.containsKey(cl)) 
       {
+     	 clPermits.remove(cl);
          permits.release();
       }
 
@@ -582,9 +582,9 @@ public class SemaphoreArrayListManagedConnectionPool implements ManagedConnectio
 
                destroy.add(cl);
 
-               ConnectionListener present = clPermits.remove(cl);
-               if (present != null)
+               if (clPermits.containsKey(cl)) 
                {
+              	  clPermits.remove(cl);
                   permits.release();
                }
             }
