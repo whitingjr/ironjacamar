@@ -41,6 +41,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.resource.ResourceException;
 import javax.resource.spi.ConnectionRequestInfo;
@@ -91,10 +92,12 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
 
    /** The available connection event listeners */
    private ArrayBlockingQueue<ConnectionListener> cls;
+   
+   private AtomicInteger clsCount;
 
    /** The checked out connections */
    private ConcurrentSkipListSet<ConnectionListener> checkedOut;
-
+   
    /** Whether the pool has been shutdown */
    private AtomicBoolean shutdown = new AtomicBoolean(false);
 
@@ -136,6 +139,7 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
       this.debug = log.isDebugEnabled();
       this.trace = log.isTraceEnabled();
       this.cls = new ArrayBlockingQueue<ConnectionListener>(pc.getMaxSize(), true);
+      this.clsCount = new AtomicInteger();
       this.checkedOut = new ConcurrentSkipListSet<ConnectionListener>();
       this.statistics = new ManagedConnectionPoolStatisticsImpl(pc.getMaxSize());
       this.statistics.setEnabled(p.getStatistics().isEnabled());
@@ -164,7 +168,8 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
     */
    public synchronized boolean isEmpty()
    {
-      return cls.size() == 0 && checkedOut.size() == 0;
+      //return cls.size() == 0 && checkedOut.size() == 0;
+	  return clsCount.get() == 0 && checkedOut.size() == 0;
    }
 
    /**
@@ -188,7 +193,8 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
     */
    public synchronized int getActive()
    {
-      return cls.size() + checkedOut.size();
+      //return cls.size() + checkedOut.size();
+	   return clsCount.get() + checkedOut.size();
    }
 
    /**
@@ -240,7 +246,8 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
       boolean verifyConnectionListener = true;
 
       long startWait = statistics.isEnabled() ? System.currentTimeMillis() : 0L;
-      if (cls.size() > 0)
+      //if (cls.size() > 0)
+      if (clsCount.get() > 0)
       {
          if (shutdown.get())
             throw new RetryableUnavailableException(
@@ -253,8 +260,19 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
             try
             {
                cl = cls.poll(poolConfiguration.getBlockingTimeout(), TimeUnit.MILLISECONDS);
+               if (null != cl)
+               {
+                  clsCount.decrementAndGet();
+            	   
+               }
+               synchronized (cls){
+            		checkedOut.add(cl);
+               }
                if (statistics.isEnabled())
+               {
                   statistics.deltaTotalBlockingTime(System.currentTimeMillis() - startWait);
+                  statistics.setInUsedCount(clsCount.get());
+               }
             }
             catch (InterruptedException ie)
             {
@@ -270,9 +288,18 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
             {
                // No, the pool was empty, so we have to make a new one.
                cl = createConnectionEventListener(subject, cri);
-
+             
+               synchronized (cls)
+               {
+            	   checkedOut.add(cl);
+               }
+               if (statistics.isEnabled())
+               {
+            	   statistics.setInUsedCount(clsCount.get());
+               }
                if (trace)
                   log.trace("supplying new ManagedConnection: " + cl);
+               
                
                verifyConnectionListener = false;
             }
@@ -289,6 +316,10 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
          try
          {
             cl = cls.poll(poolConfiguration.getBlockingTimeout(), TimeUnit.MILLISECONDS);
+            if (null != cl)
+            {
+            	clsCount.decrementAndGet();
+            }
             if (statistics.isEnabled())
                statistics.deltaTotalBlockingTime(System.currentTimeMillis() - startWait);
 
@@ -335,7 +366,7 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
             }
          }
       }
-
+      
       // Register the connection listener
       checkedOut.add(cl);
 
@@ -400,10 +431,12 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
    {
       if (trace)
       {
+    	 synchronized (cls) {
          String method = "returnConnection(" + Integer.toHexString(System.identityHashCode(cl)) + ", " + kill + ")";
          log.trace(ManagedConnectionPoolUtility.fullDetails(System.identityHashCode(this), method,
                                                             mcf, clf, pool, poolConfiguration,
                                                             cls, checkedOut, statistics));
+    	 }
       }
       else if (debug)
       {
@@ -434,11 +467,10 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
       if (cl.getState() == ConnectionState.DESTROY || cl.getState() == ConnectionState.DESTROYED)
          kill = true;
 
-      checkedOut.remove(cl);
-      statistics.setInUsedCount(checkedOut.size());
 
       // This is really an error
-      if (!kill && cls.size() >= poolConfiguration.getMaxSize())
+      //if (!kill && cls.size() >= poolConfiguration.getMaxSize())
+      if (!kill && clsCount.get() >= poolConfiguration.getMaxSize())
       {
          log.destroyingReturnedConnectionMaximumPoolSizeExceeded(cl);
          kill = true;
@@ -453,6 +485,7 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
          // e.g. JMS can do this via an ExceptionListener on the connection.
          // I have twice had to reinstate this line of code, PLEASE DO NOT REMOVE IT!
          cls.remove(cl);
+         clsCount.decrementAndGet();
       }
       // return to the pool
       else
@@ -463,6 +496,7 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
             try
             {
                cls.put(cl);
+               clsCount.incrementAndGet();
             }
             catch (InterruptedException ie)
             {
@@ -529,11 +563,16 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
       ConnectionListener cl = cls.poll();
       while (cl != null)
       {
+    	 clsCount.decrementAndGet();
          if (destroy == null)
             destroy = new ArrayList<ConnectionListener>();
 
          destroy.add(cl);
          cl = cls.poll();
+         if (null != cl)
+         {
+        	 clsCount.decrementAndGet();
+         }
       }
 
       // We need to destroy some connections
@@ -581,6 +620,10 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
                destroy = new ArrayList<ConnectionListener>(1);
 
             cl = cls.poll();
+            if (null != cl)
+            {
+            	clsCount.decrementAndGet();
+            }
 
             if (cl != null)
             {
@@ -703,6 +746,10 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
                   log.debug("Connection couldn't be inserted during fillToMin");
                   destroy = true;
                }
+               else
+               {
+            	   clsCount.incrementAndGet();
+               }
             }
             else
             {
@@ -808,7 +855,8 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
       
       if (poolConfiguration.isStrictMin())
       {
-         remove = cls.size() > poolConfiguration.getMinSize();
+         //remove = cls.size() > poolConfiguration.getMinSize();
+    	 remove = clsCount.get() > poolConfiguration.getMinSize();
          
          if (trace)
             log.trace("StrictMin is active. Current connection will be removed is " + remove);
@@ -834,7 +882,8 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
             ConnectionListener cl = null;
             boolean destroyed = false;
 
-            if (cls.size() == 0)
+            //if (cls.size() == 0)
+            if (clsCount.get() == 0)
             {
                break;
             }
@@ -913,7 +962,10 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
          if ((System.currentTimeMillis() - lastCheck) >= poolConfiguration.getBackgroundValidationMillis())
          {
             result = cl;
-            cls.remove(cl);
+            if (cls.remove(cl))
+            {
+            	clsCount.decrementAndGet();
+            }
          }
       }
 
@@ -940,6 +992,10 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
          doDestroy(cl);
          cl = null;
          return false;
+      }
+      else
+      {
+    	  clsCount.incrementAndGet();
       }
 
       return true;
