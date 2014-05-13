@@ -263,8 +263,8 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
                if (null != cl)
                {
                   clsCount.decrementAndGet();
-            	   
                }
+               
                synchronized (cls){
             		checkedOut.add(cl);
                }
@@ -288,6 +288,10 @@ public class ArrayBlockingQueueManagedConnectionPool implements ManagedConnectio
             {
                // No, the pool was empty, so we have to make a new one.
                cl = createConnectionEventListener(subject, cri);
+               if (null == cl)
+               {
+            	   log.throwableWhileAttemptingGetNewGonnection(cl, new Throwable());
+               }
              
                synchronized (cls)
                {
